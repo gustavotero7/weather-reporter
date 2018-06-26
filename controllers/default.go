@@ -1,17 +1,18 @@
 package controllers
 
 import (
-	"fmt"
-	"io/ioutil"
+	"encoding/json"
 	"log"
 	"net/http"
-	"time"
+	"weather-reporter/models"
+	"weather-reporter/utils"
 
 	"github.com/astaxie/beego"
 )
 
 type MainController struct {
 	beego.Controller
+	WeatherApp models.WeatherApp
 }
 
 func (c *MainController) Get() {
@@ -21,28 +22,38 @@ func (c *MainController) Get() {
 }
 
 func (c *MainController) GetWeather() {
+
 	city := c.Ctx.Input.Param(":city")
+	country := c.Ctx.Input.Param(":country")
 
-	url := fmt.Sprintf("http://api.openweathermap.org/data/2.5/weather?q=%s,co&appid=1508a9a4840a5574c822d70ca2132032", city)
+	url := c.WeatherApp.BuildURL(city, country)
 
-	client := http.Client{
-		Timeout: time.Second * 2, // Maximum of 2 secs
-	}
+	body, err := utils.DoWebRequest(url)
 
-	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		log.Fatal(err)
+		c.Ctx.ResponseWriter.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
-	res, getErr := client.Do(req)
-	if getErr != nil {
-		log.Fatal(getErr)
+	weatherResponse := models.WeatherResponse{}
+
+	err = json.Unmarshal(body, &weatherResponse)
+
+	if err != nil {
+		log.Fatal(err)
+		c.Ctx.ResponseWriter.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
-	body, readErr := ioutil.ReadAll(res.Body)
-	if readErr != nil {
-		log.Fatal(readErr)
-	}
+	c.Ctx.ResponseWriter.Header().Add("Content-Type", "application/json")
+	//c.Ctx.ResponseWriter.Write(body)
+	encoder := json.NewEncoder(c.Ctx.ResponseWriter)
+	err = encoder.Encode(weatherResponse)
 
-	c.Ctx.WriteString(string(body))
+	if err != nil {
+		log.Fatal(err)
+		c.Ctx.ResponseWriter.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 }
