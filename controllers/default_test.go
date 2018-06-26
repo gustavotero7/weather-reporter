@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"beego"
+	"errors"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -9,38 +10,52 @@ import (
 	"weather-reporter/models"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
-func MockWeaterAppInfo() *models.WeatherApp {
-	weatherApp := models.WeatherApp{
-		AppID:    "1508a9a4840a5574c822d70ca2132032",
-		Endpoint: "http://api.openweathermap.org/data/2.5/weather?q=%s,co&appid=%s",
-	}
-	return &weatherApp
+func NewWeaterAppMock() *MockWeaterApp {
+	mockWeatherApp := new(MockWeaterApp)
+	return mockWeatherApp
+}
+
+type MockWeaterApp struct {
+	mock.Mock
+	AppID    string
+	Endpoint string
+}
+
+func (m MockWeaterApp) AskToExternalServiceForWeather(city string, country string) (models.WeatherResponse, error) {
+	args := m.Called(city, country)
+	return args.Get(0).(models.WeatherResponse), args.Error(1)
 }
 
 func TestGetWeather(t *testing.T) {
-	r, _ := http.NewRequest("GET", "/weather/Bogota", nil)
-	w := httptest.NewRecorder()
 
+	mockWeatherApp := NewWeaterAppMock()
+	mockWeatherApp.On("AskToExternalServiceForWeather", mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(models.WeatherResponse{}, nil)
+
+	r, _ := http.NewRequest("GET", "/weather/unknownCountry/unknownCity", nil)
+	w := httptest.NewRecorder()
 	handler := beego.NewControllerRegister()
-	handler.Add("/weather/:city", &MainController{WeatherApp: *MockWeaterAppInfo()}, "get:GetWeather")
+	handler.Add("/weather/:country/:city", &MainController{WeatherApp: mockWeatherApp}, "get:GetWeather")
 	handler.ServeHTTP(w, r)
 
-	log.Println("Status code: ", w.Code)
-
-	assert.Equal(t, http.StatusOK, w.Code)
+	mockWeatherApp.AssertExpectations(t)
 }
 
 func TestGetWeatherWithNoParam(t *testing.T) {
-	r, _ := http.NewRequest("GET", "/weather", nil)
+
+	mockWeatherApp := NewWeaterAppMock()
+	mockWeatherApp.On("AskToExternalServiceForWeather", mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(models.WeatherResponse{}, errors.New("Server error"))
+
+	r, _ := http.NewRequest("GET", "/weather/unknownCountry/unknownCity", nil)
 	w := httptest.NewRecorder()
 
 	handler := beego.NewControllerRegister()
-	handler.Add("/weather/:city", &MainController{WeatherApp: *MockWeaterAppInfo()}, "get:GetWeather")
+	handler.Add("/weather/:country/:city", &MainController{WeatherApp: mockWeatherApp}, "get:GetWeather")
 	handler.ServeHTTP(w, r)
 
 	log.Println("Status code: ", w.Code)
 
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }

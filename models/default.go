@@ -1,16 +1,42 @@
 package models
 
 import (
+	"encoding/json"
 	"fmt"
+	"weather-reporter/utils"
 )
+
+type IWeatherApp interface {
+	AskToExternalServiceForWeather(string, string) (WeatherResponse, error)
+}
 
 type WeatherApp struct {
 	AppID    string
 	Endpoint string
 }
 
-func (c *WeatherApp) BuildURL(city string, country string) string {
+func (c WeatherApp) BuildURL(city string, country string) string {
 	return fmt.Sprintf(c.Endpoint, country, city, c.AppID)
+}
+
+func (c WeatherApp) AskToExternalServiceForWeather(city string, country string) (WeatherResponse, error) {
+
+	url := c.BuildURL(city, country)
+
+	body, err := utils.DoWebRequest(url)
+
+	if err != nil {
+		return WeatherResponse{}, err
+	}
+
+	weatherResponse := WeatherResponse{}
+
+	err = json.Unmarshal(body, &weatherResponse)
+
+	if err != nil {
+		return WeatherResponse{}, err
+	}
+	return weatherResponse, nil
 }
 
 type WeatherResponse struct {
