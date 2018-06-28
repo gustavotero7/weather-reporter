@@ -192,6 +192,7 @@ func (w *WeatherReport) ReadReport() error {
 			o.Delete(w)
 			return errors.New("Expired report")
 		}
+		w.RequestedTime = w.RequestedTime.UTC()
 	}
 	return err
 }
