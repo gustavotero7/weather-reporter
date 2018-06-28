@@ -12,7 +12,7 @@ import (
 func init() {
 	log.Println("Initializing db")
 	orm.RegisterDriver("mysql", orm.DRMySQL)
-	orm.RegisterDataBase("default", "mysql", "root:password@/weatherreporter?charset=utf8")
+	orm.RegisterDataBase("default", "mysql", "root:password@/weatherreporter?parseTime=true&charset=utf8")
 }
 
 func main() {

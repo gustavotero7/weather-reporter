@@ -3,6 +3,7 @@ package models
 import (
 	"beego/orm"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -10,7 +11,7 @@ import (
 )
 
 type IWeatherApp interface {
-	AskToExternalServiceForWeather(string, string) (WeatherResponse, error)
+	AskToExternalServiceForWeather(string, string) (WeatherReportRaw, error)
 }
 
 type WeatherApp struct {
@@ -22,27 +23,27 @@ func (c WeatherApp) BuildURL(city string, country string) string {
 	return fmt.Sprintf(c.Endpoint, country, city, c.AppID)
 }
 
-func (c WeatherApp) AskToExternalServiceForWeather(city string, country string) (WeatherResponse, error) {
+func (c WeatherApp) AskToExternalServiceForWeather(city string, country string) (WeatherReportRaw, error) {
 
 	url := c.BuildURL(city, country)
 
 	body, err := utils.DoWebRequest(url)
 
 	if err != nil {
-		return WeatherResponse{}, err
+		return WeatherReportRaw{}, err
 	}
 
-	weatherResponse := WeatherResponse{}
+	weatherReportRaw := WeatherReportRaw{}
 
-	err = json.Unmarshal(body, &weatherResponse)
+	err = json.Unmarshal(body, &weatherReportRaw)
 
 	if err != nil {
-		return WeatherResponse{}, err
+		return WeatherReportRaw{}, err
 	}
-	return weatherResponse, nil
+	return weatherReportRaw, nil
 }
 
-type WeatherResponse struct {
+type WeatherReportRaw struct {
 	ID    int    `json:"id"`
 	Name  string `json:"name"`
 	Coord struct {
@@ -81,7 +82,7 @@ type WeatherResponse struct {
 	} `json:"sys"`
 }
 
-type WeatherParsed struct {
+type WeatherReport struct {
 	ID             int       `orm:"column(id)"`
 	CodeName       string    `orm:"column(code_name)"`
 	LocationName   string    `orm:"column(location_name)"`
@@ -95,23 +96,23 @@ type WeatherParsed struct {
 	RequestedTime  time.Time `orm:"column(requested_time)"`
 }
 
-func (w *WeatherParsed) TableName() string {
+func (w *WeatherReport) TableName() string {
 	return "reports"
 }
 
-func (w *WeatherParsed) Parse(wr WeatherResponse) {
-	w.LocationName = wr.Name + ", " + wr.Sys.Country
-	w.Temperature = strconv.FormatFloat((wr.Main.Temp-273.15), 'f', -1, 32) + " °C"
-	w.Wind = w.DescribeWindSpeed(wr.Wind.Speed, wr.Wind.Deg)
-	w.Pressure = fmt.Sprintf("%s hPa", strconv.FormatFloat(wr.Main.Pressure, 'f', -1, 32))
-	w.Humidity = strconv.FormatFloat(wr.Main.Humidity, 'f', -1, 32) + "%"
-	w.Sunrise = time.Unix(wr.Sys.Sunrise, 0).Format("15:04")
-	w.Sunset = time.Unix(wr.Sys.Sunset, 0).Format("15:04")
-	w.GeoCoordinates = "[" + strconv.FormatFloat(wr.Coord.Lat, 'f', -1, 32) + ", " + strconv.FormatFloat(wr.Coord.Lon, 'f', -1, 32) + "]"
-	w.RequestedTime = time.Now() //.Format(time.RFC3339)
+func (w *WeatherReport) Parse(raw WeatherReportRaw) {
+	w.LocationName = raw.Name + ", " + raw.Sys.Country
+	w.Temperature = strconv.FormatFloat((raw.Main.Temp-273.15), 'f', -1, 32) + " °C"
+	w.Wind = w.DescribeWindSpeed(raw.Wind.Speed, raw.Wind.Deg)
+	w.Pressure = fmt.Sprintf("%s hPa", strconv.FormatFloat(raw.Main.Pressure, 'f', -1, 32))
+	w.Humidity = strconv.FormatFloat(raw.Main.Humidity, 'f', -1, 32) + "%"
+	w.Sunrise = time.Unix(raw.Sys.Sunrise, 0).Format("15:04")
+	w.Sunset = time.Unix(raw.Sys.Sunset, 0).Format("15:04")
+	w.GeoCoordinates = "[" + strconv.FormatFloat(raw.Coord.Lat, 'f', -1, 32) + ", " + strconv.FormatFloat(raw.Coord.Lon, 'f', -1, 32) + "]"
+	w.RequestedTime = time.Now().UTC() //.Format(time.RFC3339)
 }
 
-func (w *WeatherParsed) DescribeWindSpeed(speedMS float64, deg float64) string {
+func (w *WeatherReport) DescribeWindSpeed(speedMS float64, deg float64) string {
 	descriptions := []string{
 		"Calm",
 		"Light Air",
@@ -180,6 +181,27 @@ func (w *WeatherParsed) DescribeWindSpeed(speedMS float64, deg float64) string {
 	return windSpeedDescription + ", " + strconv.FormatFloat(speedMS, 'f', -1, 32) + " m/s (" + strconv.FormatFloat(speed, 'f', -1, 32) + " Km/h), " + windDegDescription
 }
 
+func (w *WeatherReport) ReadReport() error {
+	o := orm.NewOrm()
+	o.Using("default")
+
+	qs := o.QueryTable("reports")
+	err := qs.Filter("code_name", w.CodeName).One(w)
+	if err == nil {
+		if time.Since(w.RequestedTime) >= time.Minute*5 { //Expired
+			o.Delete(w)
+			return errors.New("Expired report")
+		}
+	}
+	return err
+}
+
+func (w *WeatherReport) WriteReport() (int64, error) {
+	o := orm.NewOrm()
+	o.Using("default")
+	return o.Insert(w)
+}
+
 func init() {
-	orm.RegisterModel(new(WeatherParsed))
+	orm.RegisterModel(new(WeatherReport))
 }
